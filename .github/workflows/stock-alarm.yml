@@ -1,0 +1,30 @@
+name: Stock Alarm
+
+on:
+  schedule:
+    # 매일 오전 8:30 KST (= UTC 23:30 전날)
+    - cron: '30 23 * * 1-5'
+  workflow_dispatch:  # 수동 실행 버튼
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install anthropic requests
+
+      - name: Run stock analysis
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          KAKAO_ACCESS_TOKEN: ${{ secrets.KAKAO_ACCESS_TOKEN }}
+        run: python analyze.py
