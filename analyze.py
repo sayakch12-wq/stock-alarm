@@ -3,23 +3,23 @@ import json
 import requests
 from datetime import datetime
 
-# Portfolio - 기성님 미래에셋 포트폴리오
 PORTFOLIO = [
-    {"ticker": "SPY",  "name": "TIGER US S&P500", "shares": 19, "avg_price_krw": 26030},
-    {"ticker": "MA",   "name": "Mastercard",       "shares": 1,  "avg_price_krw": 751054},
-    {"ticker": "MSFT", "name": "Microsoft",        "shares": 1,  "avg_price_krw": 591073},
-    {"ticker": "NVDA", "name": "NVIDIA",            "shares": 1,  "avg_price_krw": 294246},
-    {"ticker": "ORCL", "name": "Oracle",            "shares": 3,  "avg_price_krw": 253250},
-    {"ticker": "TSLA", "name": "Tesla",             "shares": 7,  "avg_price_krw": 565913},
-    {"ticker": "UNH",  "name": "UnitedHealth",      "shares": 1,  "avg_price_krw": 518451},
+    {"ticker": "SPY",  "name": "TIGER S&P500", "shares": 19, "avg_price_krw": 26030},
+    {"ticker": "MA",   "name": "Mastercard",    "shares": 1,  "avg_price_krw": 751054},
+    {"ticker": "MSFT", "name": "Microsoft",     "shares": 1,  "avg_price_krw": 591073},
+    {"ticker": "NVDA", "name": "NVIDIA",         "shares": 1,  "avg_price_krw": 294246},
+    {"ticker": "ORCL", "name": "Oracle",         "shares": 3,  "avg_price_krw": 253250},
+    {"ticker": "TSLA", "name": "Tesla",          "shares": 7,  "avg_price_krw": 565913},
+    {"ticker": "UNH",  "name": "UnitedHealth",   "shares": 1,  "avg_price_krw": 518451},
 ]
 
 KAKAO_ACCESS_TOKEN = os.environ["KAKAO_ACCESS_TOKEN"]
-USD_TO_KRW = 1380  # 환율 (고정값, 필요시 업데이트)
+USD_TO_KRW = 1380
+
 
 def get_stock_data(ticker):
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=3mo"
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/" + ticker + "?interval=1d&range=3mo"
         headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(url, headers=headers, timeout=10)
         data = r.json()
@@ -31,11 +31,10 @@ def get_stock_data(ticker):
         prev_close = meta.get("previousClose", closes[-2] if len(closes) > 1 else current_price)
         change_pct = ((current_price - prev_close) / prev_close) * 100
 
-        # RSI(14) 계산
         if len(closes) >= 15:
             gains, losses = [], []
             for i in range(1, 15):
-                diff = closes[-i] - closes[-i-1]
+                diff = closes[-i] - closes[-i - 1]
                 gains.append(diff if diff >= 0 else 0)
                 losses.append(abs(diff) if diff < 0 else 0)
             avg_gain = sum(gains) / 14
@@ -54,11 +53,10 @@ def get_stock_data(ticker):
             "rsi": rsi,
             "ma20": ma20,
             "ma50": ma50,
-            "52w_high": meta.get("fiftyTwoWeekHigh", 0),
-            "52w_low":  meta.get("fiftyTwoWeekLow", 0),
         }
     except Exception as e:
         return {"ticker": ticker, "error": str(e)}
+
 
 def get_vix():
     try:
@@ -67,11 +65,11 @@ def get_vix():
         r = requests.get(url, headers=headers, timeout=10)
         data = r.json()
         return data["chart"]["result"][0]["meta"]["regularMarketPrice"]
-    except:
+    except Exception:
         return 20.0
 
+
 def rule_based_signal(stock, port):
-    """Claude API 없이 규칙 기반으로 매수/매도/홀드 판단"""
     rsi = stock["rsi"]
     current_usd = stock["current_price_usd"]
     current_krw = current_usd * USD_TO_KRW
@@ -80,85 +78,85 @@ def rule_based_signal(stock, port):
     ma20 = stock["ma20"]
     ma50 = stock["ma50"]
 
-    # 수익률 계산
     profit_pct = ((current_krw - avg_krw) / avg_krw) * 100
-
     signals = []
-    score = 0  # 양수=매수, 음수=매도
+    score = 0
 
-    # 1. RSI 판단
     if rsi <= 30:
-        signals.append(f"RSI {rsi:.0f} 과매도")
+        signals.append("RSI %.0f oversold" % rsi)
         score += 2
     elif rsi <= 40:
-        signals.append(f"RSI {rsi:.0f} 저평가")
+        signals.append("RSI %.0f low" % rsi)
         score += 1
     elif rsi >= 70:
-        signals.append(f"RSI {rsi:.0f} 과매수")
+        signals.append("RSI %.0f overbought" % rsi)
         score -= 2
     elif rsi >= 60:
-        signals.append(f"RSI {rsi:.0f} 고평가")
+        signals.append("RSI %.0f high" % rsi)
         score -= 1
 
-    # 2. 이동평균 추세
     if current_usd > ma20 > ma50:
-        signals.append("MA 상승추세")
+        signals.append("MA uptrend")
         score += 1
     elif current_usd < ma20 < ma50:
-        signals.append("MA 하락추세")
+        signals.append("MA downtrend")
         score -= 1
 
-    # 3. 매입단가 기준 ±7~10% 판단 (핵심 전략)
     if profit_pct >= 8:
-        signals.append(f"수익 +{profit_pct:.1f}% → 매도 고려")
+        signals.append("+%.1f%% sell target" % profit_pct)
         score -= 3
     elif profit_pct >= 7:
-        signals.append(f"수익 +{profit_pct:.1f}% → 매도 접근")
+        signals.append("+%.1f%% near sell" % profit_pct)
         score -= 2
     elif profit_pct <= -8:
-        signals.append(f"손실 {profit_pct:.1f}% → 물타기 기회")
+        signals.append("%.1f%% avg down" % profit_pct)
         score += 3
     elif profit_pct <= -7:
-        signals.append(f"손실 {profit_pct:.1f}% → 물타기 고려")
+        signals.append("%.1f%% near avg down" % profit_pct)
         score += 2
 
-    # 4. 최종 판단
     if score >= 2:
-        action = "🟢 매수"
+        action = "BUY"
+        emoji = "매수"
     elif score <= -2:
-        action = "🔴 매도"
+        action = "SELL"
+        emoji = "매도"
     else:
-        action = "🟡 홀드"
+        action = "HOLD"
+        emoji = "홀드"
 
     sell_target = avg_krw * 1.08
     buy_target = avg_krw * 0.92
 
     return {
         "action": action,
+        "emoji": emoji,
         "score": score,
         "profit_pct": profit_pct,
         "current_krw": current_krw,
         "sell_target": sell_target,
         "buy_target": buy_target,
         "signals": signals,
+        "change_pct": change_pct,
     }
+
 
 def build_message(portfolio_data, vix):
     today = datetime.now().strftime("%m/%d")
 
     if vix >= 30:
-        vix_comment = f"😱 VIX {vix:.1f} 극도의 공포 → 적극 매수 기회"
+        vix_line = "VIX %.1f - 극도의 공포 (매수 기회)" % vix
     elif vix >= 25:
-        vix_comment = f"😨 VIX {vix:.1f} 공포 → 매수 기회"
+        vix_line = "VIX %.1f - 공포 (매수 기회)" % vix
     elif vix >= 20:
-        vix_comment = f"😰 VIX {vix:.1f} 불안 → 주의"
+        vix_line = "VIX %.1f - 불안 (주의)" % vix
     else:
-        vix_comment = f"😌 VIX {vix:.1f} 안정"
+        vix_line = "VIX %.1f - 안정" % vix
 
-    lines = [f"📊 [{today}] 주식 알람", f"", vix_comment, ""]
+    lines = ["[%s] 주식 알람" % today, "", vix_line, ""]
 
-    buy_list = []
     sell_list = []
+    buy_list = []
     hold_list = []
 
     for item in portfolio_data:
@@ -166,78 +164,90 @@ def build_message(portfolio_data, vix):
         p = item["portfolio"]
         r = item["result"]
         if "error" in s:
-            lines.append(f"⚠️ {p['name']}: 데이터 오류")
+            lines.append("[오류] " + p["name"])
             continue
 
-        emoji_change = "▲" if s["change_pct"] > 0 else "▼"
+        chg = r["change_pct"]
+        arrow = "+" if chg >= 0 else ""
         line = (
-            f"{r['action']} {p['name']}
-"
-            f"  현재 {r['current_krw']:,.0f}원 ({emoji_change}{abs(s['change_pct']):.1f}%)
-"
-            f"  수익률 {r['profit_pct']:+.1f}% | RSI {s['rsi']:.0f}
-"
-            f"  매도목표 {r['sell_target']:,.0f}원 | 물타기 {r['buy_target']:,.0f}원"
+            "[%s] %s
+" % (r["emoji"], p["name"]) +
+            "  현재 %s원 (%s%.1f%%)
+" % ("{:,.0f}".format(r["current_krw"]), arrow, chg) +
+            "  수익 %+.1f%% | RSI %.0f
+" % (r["profit_pct"], s["rsi"]) +
+            "  매도목표 %s원 | 물타기 %s원" % (
+                "{:,.0f}".format(r["sell_target"]),
+                "{:,.0f}".format(r["buy_target"])
+            )
         )
-        if "매수" in r["action"]:
+        if r["action"] == "BUY":
             buy_list.append(line)
-        elif "매도" in r["action"]:
+        elif r["action"] == "SELL":
             sell_list.append(line)
         else:
             hold_list.append(line)
 
     if sell_list:
-        lines.append("━━ 🔴 매도 신호 ━━")
+        lines.append("--- 매도 신호 ---")
         lines.extend(sell_list)
         lines.append("")
     if buy_list:
-        lines.append("━━ 🟢 매수 신호 ━━")
+        lines.append("--- 매수 신호 ---")
         lines.extend(buy_list)
         lines.append("")
     if hold_list:
-        lines.append("━━ 🟡 홀드 ━━")
+        lines.append("--- 홀드 ---")
         lines.extend(hold_list)
         lines.append("")
 
-    lines.append("⏰ 자동 분석 (규칙 기반)")
+    lines.append("자동 분석 (규칙 기반)")
     return "\n".join(lines)
+
 
 def send_kakao(message):
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
     headers = {
-        "Authorization": f"Bearer {KAKAO_ACCESS_TOKEN}",
-        "Content-Type": "application/x-www-form-urlencoded"
+        "Authorization": "Bearer " + KAKAO_ACCESS_TOKEN,
+        "Content-Type": "application/x-www-form-urlencoded",
     }
     template = {
         "object_type": "text",
         "text": message,
-        "link": {"web_url": "https://finance.yahoo.com", "mobile_web_url": "https://finance.yahoo.com"}
+        "link": {
+            "web_url": "https://finance.yahoo.com",
+            "mobile_web_url": "https://finance.yahoo.com",
+        },
     }
     r = requests.post(url, headers=headers, data={"template_object": json.dumps(template)})
     return r.status_code
 
+
 def main():
-    print(f"[{datetime.now()}] 분석 시작")
+    print("Analysis started: " + str(datetime.now()))
     vix = get_vix()
-    print(f"VIX: {vix:.1f}")
+    print("VIX: %.1f" % vix)
 
     portfolio_data = []
     for p in PORTFOLIO:
         sd = get_stock_data(p["ticker"])
         result = rule_based_signal(sd, p) if "error" not in sd else {}
         portfolio_data.append({"stock": sd, "portfolio": p, "result": result})
-        print(f"{p['ticker']}: {sd.get('current_price_usd', 'ERR')} | {result.get('action', 'ERR')}")
+        price = sd.get("current_price_usd", "ERR")
+        action = result.get("emoji", "ERR")
+        print("%s: %s -> %s" % (p["ticker"], price, action))
 
     message = build_message(portfolio_data, vix)
-    print("\n--- 메시지 미리보기 ---")
+    print("\n--- message preview ---")
     print(message)
 
     status = send_kakao(message)
-    print(f"\n카카오톡 발송: {status}")
+    print("\nKakaoTalk status: %d" % status)
     if status == 200:
-        print("✅ 성공!")
+        print("OK!")
     else:
-        print(f"❌ 실패 (코드: {status})")
+        print("FAILED: %d" % status)
+
 
 if __name__ == "__main__":
     main()
