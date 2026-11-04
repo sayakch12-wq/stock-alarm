@@ -1,0 +1,43 @@
+name: Backtest
+
+on:
+  schedule:
+    # 매월 1일 오전 9:11 KST (= UTC 0:11)
+    - cron: '11 0 1 * *'
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: '종목 (쉼표 구분, 비우면 기본 8종목)'
+        required: false
+        default: ''
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backtest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: pip install pandas requests pytest
+      - name: Test
+        run: python -m pytest -q tests
+      - name: Fetch prices & run backtest
+        env:
+          BT_TICKERS: ${{ github.event.inputs.tickers }}
+        run: |
+          if [ -z "$BT_TICKERS" ]; then unset BT_TICKERS; fi
+          python fetch_data.py
+          python make_report.py
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-report
+          path: |
+            backtest/report.html
+            backtest/결과요약.md
+            backtest/results/
